@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const dotenv = require('dotenv');
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 dotenv.config();
 
@@ -37,6 +37,9 @@ async function run() {
         const newsletterCollection = db.collection("newsletter_subscribers")
         const trainerCollection = db.collection('all_trainers')
 
+
+        // add a new user here
+
         app.post("/addNewUser", async (req, res) => {
             const userData = req.body;
             const { email } = userData
@@ -58,7 +61,7 @@ async function run() {
 
         });
 
-
+        // save news letter subscriber
 
         app.post("/newsletter-subscribe", async (req, res) => {
             try {
@@ -88,6 +91,7 @@ async function run() {
             }
         });
 
+        // route to apply for become a trainer 
 
         app.post('/be-trainer', async (req, res) => {
             try {
@@ -145,7 +149,7 @@ async function run() {
             }
         });
 
-
+        // get list of all newsletter subscriber
 
         app.get("/newsletter-subscribers", async (req, res) => {
             try {
@@ -156,7 +160,36 @@ async function run() {
             }
         });
 
+        // get all pending trainers list 
 
+        app.get("/pending-trainers", async (req, res) => {
+            try {
+                const pendingTrainers = await trainerCollection.find({ status: "pending" }).toArray();
+                res.send(pendingTrainers);
+            } catch (error) {
+                console.error("Error fetching pending trainers:", error);
+                res.status(500).send({ error: "Failed to fetch pending trainers." });
+            }
+        });
+
+        // get details of specific trainers
+
+        app.get("/trainers-details/:id", async (req, res) => {
+            const id = req.params.id;
+
+            try {
+                const trainer = await trainerCollection.findOne({ _id: new ObjectId(id) });
+
+                if (!trainer) {
+                    return res.status(404).send({ error: "Trainer not found" });
+                }
+
+                res.send(trainer);
+            } catch (error) {
+                console.error("Failed to fetch trainer details:", error);
+                res.status(500).send({ error: "Internal Server Error" });
+            }
+        });
 
 
         await client.db("admin").command({ ping: 1 });
