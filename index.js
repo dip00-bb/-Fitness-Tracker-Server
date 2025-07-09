@@ -191,7 +191,6 @@ async function run() {
             }
         });
 
-
         // reject pending trainer
 
         app.post('/reject-trainer/:id', async (req, res) => {
@@ -208,6 +207,55 @@ async function run() {
                 }
             } catch (err) {
                 res.status(500).send({ success: false, message: err.message });
+            }
+        });
+
+        // approve the pending rider and change rule and status
+
+        app.patch('/approve-trainer/:id', async (req, res) => {
+            const trainerId = req.params.id;
+
+            try {
+                // Step 1: Update trainer status
+                const trainerResult = await trainerCollection.updateOne(
+                    { _id: new ObjectId(trainerId) },
+                    { $set: { status: 'approved' } }
+                );
+
+                if (trainerResult.modifiedCount === 0) {
+                    return res.status(404).send({ success: false, message: 'Trainer not found or already approved' });
+                }
+
+                // Step 2: Get trainer's email
+                const trainer = await trainerCollection.findOne({ _id: new ObjectId(trainerId) });
+                const trainerEmail = trainer.email;
+
+                // Step 3: Update user role
+                const userResult = await userCollection.updateOne(
+                    { email: trainerEmail },
+                    { $set: { userRole: 'trainer' } }
+                );
+
+                if (userResult.modifiedCount === 0) {
+                    return res.status(404).send({ success: false, message: 'User not found or role already trainer' });
+                }
+
+                res.send({ success: true, message: 'Trainer approved and user role updated' });
+
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
+
+        // get all approved trainers
+
+        app.get('/approved-trainers', async (req, res) => {
+            try {
+                const approved = await trainerCollection.find({ status: 'approved' }).toArray();
+                res.send(approved);
+            } catch (err) {
+                res.status(500).send({ success: false, message: 'Error fetching trainers' });
             }
         });
 
