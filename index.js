@@ -30,7 +30,7 @@ async function run() {
 
     try {
         // Connect the client to the server	(optional starting in v4.7)
-        await client.connect();
+        // await client.connect();
         // Send a ping to confirm a successful connection
         const db = client.db("FitNess");
         const userCollection = db.collection('user_information')
@@ -190,6 +190,27 @@ async function run() {
                 res.status(500).send({ error: "Internal Server Error" });
             }
         });
+
+
+        // reject pending trainer
+
+        app.post('/reject-trainer/:id', async (req, res) => {
+            const { id } = req.params;
+
+            try {
+                const result = await trainerCollection.deleteOne({ _id: new ObjectId(id) });
+
+                if (result.deletedCount > 0) {
+                    // You can optionally log or store the feedback elsewhere
+                    res.send({ success: true });
+                } else {
+                    res.send({ success: false, message: 'Trainer not found or already removed' });
+                }
+            } catch (err) {
+                res.status(500).send({ success: false, message: err.message });
+            }
+        });
+
 
 
         await client.db("admin").command({ ping: 1 });
