@@ -147,6 +147,14 @@ async function run() {
 
 
 
+        app.get("/newsletter-subscribers", async (req, res) => {
+            try {
+                const subscribers = await newsletterCollection.find().toArray();
+                res.send(subscribers);
+            } catch (err) {
+                res.status(500).send({ error: "Failed to fetch subscribers" });
+            }
+        });
 
 
 
