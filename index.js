@@ -279,8 +279,49 @@ async function run() {
         });
 
 
+        // after delete a trainer demote him into member
+
+        app.patch('/demote-to-member', async (req, res) => {
+            const { email } = req.body;
+            if (!email) return res.status(400).send({ success: false, message: 'Email required' });
+
+            try {
+                const result = await userCollection.updateOne(
+                    { email },
+                    { $set: { userRole: 'member' } }
+                );
+
+                if (result.modifiedCount === 0) {
+                    return res.status(404).send({ success: false, message: 'User not found or already member' });
+                }
+
+                res.send({ success: true, message: 'User demoted to member' });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
 
 
+        // remove trainer data from trainer collection
+
+        app.delete('/delete-trainer', async (req, res) => {
+            const { email } = req.query;
+            if (!email) return res.status(400).send({ success: false, message: 'Email query param required' });
+
+            try {
+                const result = await trainerCollection.deleteOne({ email });
+
+                if (result.deletedCount === 0) {
+                    return res.status(404).send({ success: false, message: 'Trainer not found' });
+                }
+
+                res.send({ success: true, message: 'Trainer removed from trainerCollection' });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
 
 
 
