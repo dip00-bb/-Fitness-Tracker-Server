@@ -36,7 +36,7 @@ async function run() {
         const userCollection = db.collection('user_information')
         const newsletterCollection = db.collection("newsletter_subscribers")
         const trainerCollection = db.collection('all_trainers')
-
+        const classesCollection = db.collection('all_classes')
 
         // add a new user here
 
@@ -258,6 +258,35 @@ async function run() {
                 res.status(500).send({ success: false, message: 'Error fetching trainers' });
             }
         });
+
+
+        // added classes by admin 
+
+        app.post('/admin-classes', async (req, res) => {
+            try {
+                const { name, image, details, extraInfo } = req.body;
+                const result = await classesCollection.insertOne({
+                    name,
+                    image,
+                    details,
+                    extraInfo,
+                    createdAt: new Date()
+                });
+                res.send({ success: true, insertedId: result.insertedId });
+            } catch (err) {
+                res.status(500).send({ success: false, error: err.message });
+            }
+        });
+
+
+
+
+
+
+
+
+
+
 
 
 
