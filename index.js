@@ -339,6 +339,7 @@ async function run() {
         });
 
 
+        // get previously added data by a trainer for read only ui
 
         app.get('/add-new-slot/:email', async (req, res) => {
             const { email } = req.params;
@@ -372,11 +373,126 @@ async function run() {
             }
         });
 
+        // this will add new slot information in exiting trainer data set
+        app.patch('/add-new-slot/:email', async (req, res) => {
+            const { email } = req.params;
+            const { day, slotName, slotTime, classId, extraInfo, } = req.body;
+
+            // minimal validation
+            if (!day || !slotName || !slotTime || !classId) {
+                return res
+                    .status(400)
+                    .send({ success: false, message: 'Missing slot fields' });
+            }
+
+            const newSlot = {
+                _id: new ObjectId(),           // give each slot its own id
+                slotName,
+                day,
+                slotTime,
+                classId: classId,
+                extraInfo
+            };
+
+            try {
+                const result = await trainerCollection.updateOne(
+                    { email, status: 'approved' },
+                    { $push: { slots: newSlot } }
+                );
+
+                if (result.modifiedCount === 0) {
+                    return res
+                        .status(404)
+                        .send({ success: false, message: 'Trainer not found or slot not added' });
+                }
+
+                res.send({ success: true, message: 'Slot added' });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
 
 
+        app.get('/trainer-slot/:email', async (req, res) => {
+            const { email } = req.params;
 
+            try {
+                const trainer = await trainerCollection.findOne(
+                    { email, status: 'approved' },
+                    { projection: { fullName: 1, slots: 1, _id: 0 } }
+                );
 
+                if (!trainer) {
+                    return res
+                        .status(404)
+                        .send({ success: false, message: 'Trainer not found or not approved' });
+                }
 
+                /* If trainer has no slots yet, send empty array */
+                res.send({
+                    success: true,
+                    fullName: trainer.fullName,
+                    slots: trainer.slots || []
+                });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
+
+        // insert a trainer in the class 
+        app.patch('/insert-trainer-in-class/:id', async (req, res) => {
+            const { id } = req.params;
+            const { trainerImage, trainerEmail } = req.body;
+
+            if (!trainerEmail || !trainerImage) {
+                return res.status(400).send({ success: false, message: 'Missing trainer info' });
+            }
+
+            try {
+                /* ── 1️⃣  Fetch the class once ── */
+                const cls = await classesCollection.findOne(
+                    { _id: new ObjectId(id) },
+                    { projection: { trainer: 1 } }
+                );
+
+                if (!cls) {
+                    return res.status(404).send({ success: false, message: 'Class not found' });
+                }
+
+                /* ── 2️⃣  Duplicate / capacity checks ── */
+                const trainersArr = cls.trainer || [];
+
+                // a) Duplicate?
+                const alreadyExists = trainersArr.some(t => t.trainerEmail === trainerEmail);
+                if (alreadyExists) {
+                    return res
+                        .status(400)
+                        .send({ success: false, message: 'Trainer already added to this class' });
+                }
+
+                // b) Capacity (max 5)
+                if (trainersArr.length >= 5) {
+                    return res
+                        .status(400)
+                        .send({ success: false, message: 'Trainer limit (5) reached for this class' });
+                }
+
+                /* ── 3️⃣  Push new trainer ── */
+                const newTrainer = { trainerImage, trainerEmail };
+
+                const result = await classesCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $push: { trainer: newTrainer } }
+                );
+
+                res.send({ success: true, message: 'Trainer added', modifiedCount: result.modifiedCount });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
 
 
 
