@@ -324,6 +324,55 @@ async function run() {
         });
 
 
+        // returns all class docs for the select list
+
+        app.get('/admin-classes', async (_req, res) => {
+            try {
+                const classes = await classesCollection
+                    .find({})
+                    .toArray();
+                res.send({ success: true, data: classes });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
+
+
+
+        app.get('/add-new-slot/:email', async (req, res) => {
+            const { email } = req.params;
+
+            try {
+                const trainer = await trainerCollection.findOne(
+                    { email, status: 'approved' },
+                    {
+                        projection: {
+                            _id: 0,
+                            fullName: 1,
+                            email: 1,
+                            availableDays: 1,
+                            availableTime: 1,
+                            skills: 1,
+                            profileImage: 1
+                        }
+                    }
+                );
+
+                if (!trainer) {
+                    return res
+                        .status(404)
+                        .send({ success: false, message: 'Trainer not found' });
+                }
+
+                res.send({ success: true, data: trainer });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
+
+
 
 
 
