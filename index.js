@@ -37,7 +37,8 @@ async function run() {
         const newsletterCollection = db.collection("newsletter_subscribers");
         const trainerCollection = db.collection('all_trainers');
         const classesCollection = db.collection('all_classes');
-        const rejectionFeedback = db.collection('feedbacks')
+        const rejectionFeedback = db.collection('feedbacks');
+        const forumsCollection =db.collection('forums_data');
 
         // add a new user here
 
@@ -616,6 +617,37 @@ async function run() {
                 }
 
                 res.json({ success: true, ...fbDoc });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+
+        app.post('/save-forums-data', async (req, res) => {
+            const { title, tags = [], content, imageURL = '',authorImage,author,authorEmail } = req.body;
+
+            if (!title || !content) {
+                return res
+                    .status(400)
+                    .json({ success: false, message: 'Title and content are required' });
+            }
+
+            try {
+                const doc = {
+                    title,
+                    tags,
+                    content,
+                    imageURL,
+                    authorImage,
+                    author,
+                    authorEmail,
+                    voteCount: 0,                 
+                    createdAt: new Date().toISOString()
+                };
+
+                await forumsCollection.insertOne(doc);
+                res.json({ success: true, message: 'Forum saved' });
             } catch (err) {
                 console.error(err);
                 res.status(500).json({ success: false, message: 'Server error' });
