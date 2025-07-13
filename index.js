@@ -270,6 +270,7 @@ async function run() {
                     image,
                     details,
                     extraInfo,
+                    trainer: [],
                     createdAt: new Date()
                 });
                 res.send({ success: true, insertedId: result.insertedId });
@@ -349,7 +350,7 @@ async function run() {
                     { email, status: 'approved' },
                     {
                         projection: {
-                            _id: 0,
+                            _id: 1,
                             fullName: 1,
                             email: 1,
                             availableDays: 1,
@@ -367,6 +368,7 @@ async function run() {
                 }
 
                 res.send({ success: true, data: trainer });
+
             } catch (err) {
                 console.error(err);
                 res.status(500).send({ success: false, message: 'Server error' });
@@ -444,7 +446,7 @@ async function run() {
         // insert a trainer in the class 
         app.patch('/insert-trainer-in-class/:id', async (req, res) => {
             const { id } = req.params;
-            const { trainerImage, trainerEmail } = req.body;
+            const { trainerImage, trainerEmail, trainerID } = req.body;
 
             if (!trainerEmail || !trainerImage) {
                 return res.status(400).send({ success: false, message: 'Missing trainer info' });
@@ -480,7 +482,7 @@ async function run() {
                 }
 
                 /* ── 3️⃣  Push new trainer ── */
-                const newTrainer = { trainerImage, trainerEmail };
+                const newTrainer = { trainerImage, trainerEmail, trainerID };
 
                 const result = await classesCollection.updateOne(
                     { _id: new ObjectId(id) },
@@ -494,8 +496,40 @@ async function run() {
             }
         });
 
+        // change user profile information
+        app.patch('/update-profile', async (req, res) => {
+            const { email, name, photoURL, lastLogin } = req.body;
+
+            if (!email) {
+                return res.status(400).send({ success: false, message: 'Email missing' });
+            }
+
+            try {
+                const result = await userCollection.updateOne(
+                    { email },
+                    {
+                        $set: {
+                            name,
+                            photoURL,
+                            lastLogin
+                        }
+                    }
+                );
+
+                if (result.modifiedCount === 0) {
+                    return res.status(404).send({ success: false, message: 'User not found' });
+                }
+
+                res.send({ success: true, message: 'Profile updated' });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
 
 
+
+        
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
