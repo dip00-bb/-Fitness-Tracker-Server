@@ -33,10 +33,11 @@ async function run() {
         // await client.connect();
         // Send a ping to confirm a successful connection
         const db = client.db("FitNess");
-        const userCollection = db.collection('user_information')
-        const newsletterCollection = db.collection("newsletter_subscribers")
-        const trainerCollection = db.collection('all_trainers')
-        const classesCollection = db.collection('all_classes')
+        const userCollection = db.collection('user_information');
+        const newsletterCollection = db.collection("newsletter_subscribers");
+        const trainerCollection = db.collection('all_trainers');
+        const classesCollection = db.collection('all_classes');
+        const rejectionFeedback = db.collection('feedbacks')
 
         // add a new user here
 
@@ -149,6 +150,39 @@ async function run() {
             }
         });
 
+
+        // add pending trainer status on user profile data
+        app.patch('/add-pending-trainer-status/:email', async (req, res) => {
+            const { email } = req.params;
+
+            if (!email) {
+                return res.status(400).send({ success: false, message: 'Email required' });
+            }
+
+            try {
+                const result = await userCollection.updateOne(
+                    { email, userRole: 'member' },
+                    { $set: { trainerStatus: 'pending' } }
+                );
+
+                if (result.modifiedCount === 0) {
+                    return res
+                        .status(404)
+                        .send({
+                            success: false,
+                            message: 'User not found or already pending/ trainer'
+                        });
+                }
+
+                res.send({ success: true, message: 'Status changed to pending' });
+            } catch (err) {
+                console.error(err);
+                res.status(500).send({ success: false, message: 'Server error' });
+            }
+        });
+
+        // remove pending trainer status add rejected status
+
         // get list of all newsletter subscriber
 
         app.get("/newsletter-subscribers", async (req, res) => {
@@ -195,16 +229,38 @@ async function run() {
 
         app.post('/reject-trainer/:id', async (req, res) => {
             const { id } = req.params;
+            const { feedback, email } = req.body;
+
+            console.log("gghhfghfgfgfgf", feedback, email)
 
             try {
                 const result = await trainerCollection.deleteOne({ _id: new ObjectId(id) });
 
-                if (result.deletedCount > 0) {
-                    // You can optionally log or store the feedback elsewhere
-                    res.send({ success: true });
-                } else {
-                    res.send({ success: false, message: 'Trainer not found or already removed' });
+                if (result.deletedCount === 0) {
+                    return res
+                        .status(404)
+                        .send({ success: false, message: 'Trainer not found or already removed' });
                 }
+
+
+                await rejectionFeedback.updateOne(
+                    { email },                                  // match by user email
+                    {
+                        $set: {
+                            email,
+                            feedback,
+                            rejectedAt: new Date().toISOString()
+                        }
+                    },
+                    { upsert: true }
+                )
+
+                await userCollection.updateOne(
+                    { email: email },
+                    { $set: { trainerStatus: 'rejected' } }
+                )
+
+                res.send({ success: true });
             } catch (err) {
                 res.status(500).send({ success: false, message: err.message });
             }
@@ -528,8 +584,48 @@ async function run() {
         });
 
 
+        app.get('/trainer-status-list', async (_req, res) => {
+            try {
+                const users = await userCollection
+                    .find(
+                        { trainerStatus: { $in: ['pending', 'rejected'] } },
+                        { projection: { _id: 0, name: 1, email: 1, trainerStatus: 1 } }
+                    )
+                    .toArray();
 
-        
+                res.json({ success: true, users });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+
+        app.get('/rejection-feedback/:email', async (req, res) => {
+            const { email } = req.params;
+            try {
+                const fbDoc = await rejectionFeedback.findOne(
+                    { email },
+                    { projection: { _id: 0, feedback: 1, rejectedAt: 1 } }
+                );
+
+                if (!fbDoc) {
+                    return res
+                        .status(404)
+                        .json({ success: false, message: 'No feedback found for this user' });
+                }
+
+                res.json({ success: true, ...fbDoc });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+
+
+
+
         await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
