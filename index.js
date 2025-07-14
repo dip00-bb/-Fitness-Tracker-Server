@@ -1,8 +1,8 @@
 const express = require('express');
+const jwt = require("jsonwebtoken");
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
-
 dotenv.config();
 
 const app = express();
@@ -12,7 +12,43 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// json token generator function
+function generateToken(userEmail) {
+    return jwt.sign({ email: userEmail }, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRES_IN,
+    });
+}
 
+
+
+function verifyToken(req, res, next) {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).send("Unauthorized access");
+
+    jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
+        if (err) return res.status(403).send("Forbidden access");
+        req.user = decoded;
+        next();
+    });
+}
+
+
+async function isAdmin(req, res, next) {
+    const user = await db.collection("users").findOne({ email: req.user.email });
+    if (user?.role !== "admin") return res.status(403).send("Only Admin");
+    next();
+}
+
+async function isTrainer(req, res, next) {
+    const user = await db.collection("users").findOne({ email: req.user.email });
+    if (user?.role !== "trainer") return res.status(403).send("Only Trainer");
+    next();
+}
+
+
+const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY)
+
+console.log(process.env.PAYMENT_GATEWAY_KEY)
 
 const uri = `mongodb+srv://${process.env.USER}:${process.env.PASS}@clusterone.0khaeh6.mongodb.net/?retryWrites=true&w=majority&appName=ClusterOne`;
 
@@ -32,13 +68,15 @@ async function run() {
         // Connect the client to the server	(optional starting in v4.7)
         // await client.connect();
         // Send a ping to confirm a successful connection
+
+
         const db = client.db("FitNess");
         const userCollection = db.collection('user_information');
         const newsletterCollection = db.collection("newsletter_subscribers");
         const trainerCollection = db.collection('all_trainers');
         const classesCollection = db.collection('all_classes');
         const rejectionFeedback = db.collection('feedbacks');
-        const forumsCollection =db.collection('forums_data');
+        const forumsCollection = db.collection('forums_data');
 
         // add a new user here
 
@@ -232,8 +270,6 @@ async function run() {
             const { id } = req.params;
             const { feedback, email } = req.body;
 
-            console.log("gghhfghfgfgfgf", feedback, email)
-
             try {
                 const result = await trainerCollection.deleteOne({ _id: new ObjectId(id) });
 
@@ -381,7 +417,6 @@ async function run() {
             }
         });
 
-
         // returns all class docs for the select list
 
         app.get('/admin-classes', async (_req, res) => {
@@ -395,7 +430,6 @@ async function run() {
                 res.status(500).send({ success: false, message: 'Server error' });
             }
         });
-
 
         // get previously added data by a trainer for read only ui
 
@@ -434,11 +468,13 @@ async function run() {
 
         // this will add new slot information in exiting trainer data set
         app.patch('/add-new-slot/:email', async (req, res) => {
+
+
             const { email } = req.params;
-            const { day, slotName, slotTime, classId, extraInfo, } = req.body;
+            const { slotName, slotTime, slotDay, classId, extraInfo, trainerID, trainerEmail } = req.body;
 
             // minimal validation
-            if (!day || !slotName || !slotTime || !classId) {
+            if (!slotName || !slotDay || !classId) {
                 return res
                     .status(400)
                     .send({ success: false, message: 'Missing slot fields' });
@@ -447,16 +483,19 @@ async function run() {
             const newSlot = {
                 _id: new ObjectId(),           // give each slot its own id
                 slotName,
-                day,
+                trainerID,
+                slotDay,
                 slotTime,
+                trainerEmail,
                 classId: classId,
                 extraInfo
             };
 
             try {
                 const result = await trainerCollection.updateOne(
+
                     { email, status: 'approved' },
-                    { $push: { slots: newSlot } }
+                    { $push: { slots: newSlot } },
                 );
 
                 if (result.modifiedCount === 0) {
@@ -623,9 +662,10 @@ async function run() {
             }
         });
 
+        // save forms data
 
         app.post('/save-forums-data', async (req, res) => {
-            const { title, tags = [], content, imageURL = '',authorImage,author,authorEmail } = req.body;
+            const { title, tags = [], content, imageURL = '', authorImage, author, authorEmail } = req.body;
 
             if (!title || !content) {
                 return res
@@ -642,7 +682,7 @@ async function run() {
                     authorImage,
                     author,
                     authorEmail,
-                    voteCount: 0,                 
+                    voteCount: 0,
                     createdAt: new Date().toISOString()
                 };
 
@@ -655,10 +695,182 @@ async function run() {
         });
 
 
+        // get forums details
+
+        app.get('/forums', async (req, res) => {
+            const page = parseInt(req.query.page) || 1;
+            const limit = 6;
+            const skip = (page - 1) * limit;
+
+            try {
+                const total = await forumsCollection.countDocuments();
+                const forums = await forumsCollection
+                    .find({})
+                    .sort({ createdAt: -1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .toArray();
+
+                res.json({
+                    success: true,
+                    data: forums,
+                    currentPage: page,
+                    totalPages: Math.ceil(total / limit)
+                });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+        // forums voting
+        app.patch('/forum-vote/:id', async (req, res) => {
+            const { id } = req.params;
+            const { vote } = req.body;      // +1 or -1
+
+
+            if (![1, -1].includes(vote))
+                return res.status(400).json({ success: false, message: 'Vote must be 1 or -1' });
+
+            try {
+                const result = await forumsCollection.updateOne(
+                    { _id: new ObjectId(id) },
+                    { $inc: { voteCount: vote } }
+                );
+
+                if (result.modifiedCount === 0)
+                    return res.status(404).json({ success: false, message: 'Post not found' });
+
+                res.json({ success: true });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+        // implement delete slot functionality
+
+        app.delete('/delete-slot/:slotId', async (req, res) => {
+            const { slotId } = req.params;
+            const { email } = req.body;
+
+            if (!email)
+                return res.status(400).json({ success: false, message: 'Email required' });
+
+            try {
+                // pull + return the slot
+                const trainerRes = await trainerCollection.findOneAndUpdate(
+                    { email, 'slots._id': new ObjectId(slotId) },
+                    { $pull: { slots: { _id: new ObjectId(slotId) } } },
+                    { projection: { 'slots.$': 1 }, returnDocument: 'before' }
+                );
+
+                console.log("ddd", trainerRes)
+
+                const removedSlot = trainerRes?.slots?.[0];
+
+                console.log("kkk", removedSlot)
+                if (!removedSlot)
+                    return res.status(404).json({ success: false, message: 'Slot not found' });
+
+                // pull trainer ref from class
+                await classesCollection.updateOne(
+                    { _id: new ObjectId(removedSlot.classId) },
+                    { $pull: { trainer: { trainerEmail: email } } }
+                );
+
+                res.json({ success: true, message: 'Slot & class link deleted' });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+        // get user role 
+
+        app.get('/user-role/:email', async (req, res) => {
+            const email = req.params.email;
+            const result = await userCollection.findOne(
+                { email },
+            )
+            res.send({ role: result?.userRole });
+
+            console.log("user logged in you system")
+        })
+
+        //give a token to a user after he login
+
+        app.post('/jwt', async (req, res) => {
+            const { email } = req.body;
+            if (!email) return res.status(400).send({ message: 'Email required' });
+
+            const token = generateToken(email);
+            res.send({ token });
+        });
+
+
+        app.get('/slot-details/:slotId', async (req, res) => {
+            const { slotId } = req.params;
+
+            const trainerId = req.query.trainerId;
+
+            console.log(trainerId)
+
+            if (!trainerId)
+                return res.status(400).json({ success: false, message: 'trainerId required' });
+
+            try {
+                // 1️⃣  Find trainer by _id AND the slot inside his slots array
+                const trainerDoc = await trainerCollection.findOne(
+                    {
+                        _id: new ObjectId(trainerId),
+                        'slots._id': new ObjectId(slotId)
+                    },
+                    {
+                        projection: { 'slots.$': 1, _id: 0 }
+                    }
+                );
+
+                console.log(trainerDoc)
+
+                if (!trainerDoc || !trainerDoc.slots?.length)
+                    return res.status(404).json({ success: false, message: 'Slot not found' });
+
+                // 2️⃣  Return the matched slot
+                res.json({ success: true, data: trainerDoc.slots[0] });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+        // payment intent 
+
+        app.post('/create-payment-intent', async (req, res) => {
+            try {
+                const { amount, slotId } = req.body;
+
+                console.log(amount, slotId)
+
+                // Convert amount to smallest currency unit (e.g., $10.00 -> 1000 cents)
+                const paymentIntent = await stripe.paymentIntents.create({
+                    amount: amount,
+                    currency: 'usd',
+                    payment_method_types: ['card'],
+                });
+
+                res.send({
+                    clientSecret: paymentIntent.client_secret,
+                });
+            } catch (error) {
+                console.error('Payment Intent Error:', error);
+                res.status(500).send({ error: error.message });
+            }
+        })
 
 
 
-        await client.db("admin").command({ ping: 1 });
+        // await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
