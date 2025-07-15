@@ -473,7 +473,7 @@ async function run() {
 
 
             const { email } = req.params;
-            const { slotName, slotTime, slotDay, classId, extraInfo, trainerID, trainerEmail, bookedByStudent } = req.body;
+            const { slotName, slotTime, slotDay, classId, extraInfo, trainerID, trainerEmail, bookedByStudent,className } = req.body;
 
             // minimal validation
             if (!slotName || !slotDay || !classId) {
@@ -488,6 +488,7 @@ async function run() {
                 trainerID,
                 slotDay,
                 slotTime,
+                className,
                 trainerEmail,
                 classId: classId,
                 extraInfo,
@@ -967,6 +968,24 @@ async function run() {
             }
         });
 
+        // get payment history
+        app.get('/payment-history/:email', async (req, res) => {
+            const email = req.params.email;
+            if (!email)
+                return res.status(400).json({ success: false, message: 'Email query required' });
+
+            try {
+                const history = await paymentHistory
+                    .find({ studentEmail: email })
+                    .sort({ paidAt: -1 })               
+                    .toArray();
+
+                res.json({ success: true, data: history });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
 
 
         // await client.db("admin").command({ ping: 1 });
