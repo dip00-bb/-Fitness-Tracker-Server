@@ -77,6 +77,7 @@ async function run() {
         const classesCollection = db.collection('all_classes');
         const rejectionFeedback = db.collection('feedbacks');
         const forumsCollection = db.collection('forums_data');
+        const paymentHistory = db.collection('payment_history')
 
         // add a new user here
 
@@ -357,12 +358,13 @@ async function run() {
 
         app.post('/admin-classes', async (req, res) => {
             try {
-                const { name, image, details, extraInfo } = req.body;
+                const { name, image, details, extraInfo, totalBooked } = req.body;
                 const result = await classesCollection.insertOne({
                     name,
                     image,
                     details,
                     extraInfo,
+                    totalBooked,
                     trainer: [],
                     createdAt: new Date()
                 });
@@ -471,7 +473,7 @@ async function run() {
 
 
             const { email } = req.params;
-            const { slotName, slotTime, slotDay, classId, extraInfo, trainerID, trainerEmail } = req.body;
+            const { slotName, slotTime, slotDay, classId, extraInfo, trainerID, trainerEmail, bookedByStudent } = req.body;
 
             // minimal validation
             if (!slotName || !slotDay || !classId) {
@@ -488,7 +490,8 @@ async function run() {
                 slotTime,
                 trainerEmail,
                 classId: classId,
-                extraInfo
+                extraInfo,
+                bookedByStudent
             };
 
             try {
@@ -867,6 +870,102 @@ async function run() {
                 res.status(500).send({ error: error.message });
             }
         })
+
+
+        // save payment history jn db
+
+        app.post('/save-payment-history', async (req, res) => {
+            const {
+                slotId,
+                trainerId,
+                studentEmail,
+                studentName,
+                amount,
+                transactionId,
+                paymentMethod
+            } = req.body;
+
+            /* ---- basic validation ---- */
+            if (
+                !slotId ||
+                !trainerId ||
+                !studentEmail ||
+                !studentName ||
+                !amount ||
+                !transactionId ||
+                !paymentMethod
+            ) {
+                return res
+                    .status(400)
+                    .json({ success: false, message: 'Missing payment fields' });
+            }
+
+            try {
+                /* 1️⃣  Save payment history */
+                await paymentHistory.insertOne({
+                    slotId: new ObjectId(slotId),
+                    trainerId: new ObjectId(trainerId),
+                    studentEmail,
+                    studentName,
+                    amount,
+                    transactionId,
+                    paymentMethod,
+                    paidAt: new Date()
+                });
+
+                /* 2️⃣  Find trainer and slot to get classId */
+                const trainerDoc = await trainerCollection.findOne(
+                    {
+                        _id: new ObjectId(trainerId),
+                        'slots._id': new ObjectId(slotId)
+                    },
+                    { projection: { 'slots.$': 1 } }
+                );
+
+                if (!trainerDoc || !trainerDoc.slots?.length) {
+                    return res
+                        .status(404)
+                        .json({ success: false, message: 'Trainer or slot not found' });
+                }
+
+                const { classId } = trainerDoc.slots[0]; // retrieved from slot
+
+
+
+                await trainerCollection.updateOne(
+                    { _id: new ObjectId(trainerId), 'slots._id': new ObjectId(slotId) },
+                    {
+                        $addToSet: {
+                            'slots.$.bookedByStudent': {
+                                email: studentEmail,
+                                name: studentName,
+                                bookedAt: new Date()
+                            }
+                        }
+                    }
+                );
+
+
+
+                /* 3️⃣  Increment totalBooked on that class */
+                const classUpdate = await classesCollection.updateOne(
+                    { _id: new ObjectId(classId) },
+                    { $inc: { totalBooked: 1 } }
+                );
+
+                if (classUpdate.matchedCount === 0) {
+                    return res
+                        .status(404)
+                        .json({ success: false, message: 'Class not found' });
+                }
+
+                /* 4️⃣  All good */
+                res.json({ success: true, message: 'Payment recorded and booking count updated' });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
 
 
 
