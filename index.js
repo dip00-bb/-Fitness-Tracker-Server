@@ -77,7 +77,8 @@ async function run() {
         const classesCollection = db.collection('all_classes');
         const rejectionFeedback = db.collection('feedbacks');
         const forumsCollection = db.collection('forums_data');
-        const paymentHistory = db.collection('payment_history')
+        const paymentHistory = db.collection('payment_history');
+        const userReviews = db.collection('users_reviews');
 
         // add a new user here
 
@@ -473,7 +474,7 @@ async function run() {
 
 
             const { email } = req.params;
-            const { slotName, slotTime, slotDay, classId, extraInfo, trainerID, trainerEmail, bookedByStudent,className } = req.body;
+            const { slotName, slotTime, slotDay, classId, extraInfo, trainerID, trainerEmail, bookedByStudent, className } = req.body;
 
             // minimal validation
             if (!slotName || !slotDay || !classId) {
@@ -977,7 +978,7 @@ async function run() {
             try {
                 const history = await paymentHistory
                     .find({ studentEmail: email })
-                    .sort({ paidAt: -1 })               
+                    .sort({ paidAt: -1 })
                     .toArray();
 
                 res.json({ success: true, data: history });
@@ -986,6 +987,75 @@ async function run() {
                 res.status(500).json({ success: false, message: 'Server error' });
             }
         });
+
+        app.post('/add-review', async (req, res) => {
+            const {
+                trainerId,
+                className,
+                slotId,
+                rating,
+                reviewer,
+                comment,
+                reviewerEmail,
+                reviewerImage
+            } = req.body;
+
+            if (!trainerId || !rating || !reviewer) {
+                return res.status(400).json({ message: 'Missing required fields' });
+            }
+
+            const reviewDoc = {
+                trainerId,
+                className,
+                reviewerEmail,
+                slotId,
+                rating,
+                reviewer,
+                comment,
+                reviewerImage,
+                createdAt: new Date()
+            };
+
+            try {
+                const result = await userReviews.insertOne(reviewDoc);
+                res.status(201).json({ message: 'Review added', insertedId: result.insertedId });
+            } catch (err) {
+                console.error('Failed to add review:', err);
+                res.status(500).json({ message: 'Internal Server Error' });
+            }
+
+
+        });
+
+
+        // get top six classes
+
+        app.get('/top-classes', async (req, res) => {
+            try {
+                const topClasses = await classesCollection
+                    .aggregate([
+                        { $match: { totalBooked: { $gt: 0 } } }, 
+                        { $sort: { totalBooked: -1, createdAt: -1 } }, 
+                        { $limit: 6 },
+                        {
+                            $project: {
+                                _id: 1,
+                                name: 1,
+                                details: 1,
+                                image: 1,
+                                totalBooked: 1
+                            }
+                        }
+                    ])
+                    .toArray();
+
+                res.status(200).json(topClasses);
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ message: 'Failed to fetch featured classes' });
+            }
+        })
+
 
 
         // await client.db("admin").command({ ping: 1 });
