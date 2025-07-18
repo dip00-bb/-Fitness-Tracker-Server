@@ -14,8 +14,8 @@ app.use(express.json());
 
 // json token generator function
 function generateToken(userEmail) {
-    return jwt.sign({ email: userEmail }, process.env.JWT_SECRET, {
-        expiresIn: process.env.JWT_EXPIRES_IN,
+    return jwt.sign({ email: userEmail }, process.env.JWT_SECRET_KEY, {
+        expiresIn: '7d',
     });
 }
 
@@ -23,6 +23,7 @@ function generateToken(userEmail) {
 
 function verifyToken(req, res, next) {
     const token = req.headers.authorization?.split(" ")[1];
+    console.log(token)
     if (!token) return res.status(401).send("Unauthorized access");
 
     jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
@@ -33,22 +34,11 @@ function verifyToken(req, res, next) {
 }
 
 
-async function isAdmin(req, res, next) {
-    const user = await db.collection("users").findOne({ email: req.user.email });
-    if (user?.role !== "admin") return res.status(403).send("Only Admin");
-    next();
-}
 
-async function isTrainer(req, res, next) {
-    const user = await db.collection("users").findOne({ email: req.user.email });
-    if (user?.role !== "trainer") return res.status(403).send("Only Trainer");
-    next();
-}
 
 
 const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY)
 
-console.log(process.env.PAYMENT_GATEWAY_KEY)
 
 const uri = `mongodb+srv://${process.env.USER}:${process.env.PASS}@clusterone.0khaeh6.mongodb.net/?retryWrites=true&w=majority&appName=ClusterOne`;
 
@@ -81,6 +71,7 @@ async function run() {
         const userReviews = db.collection('users_reviews');
 
         // add a new user here
+
 
         app.post("/addNewUser", async (req, res) => {
             const userData = req.body;
@@ -226,7 +217,7 @@ async function run() {
 
         // get list of all newsletter subscriber
 
-        app.get("/newsletter-subscribers", async (req, res) => {
+        app.get("/newsletter-subscribers", verifyToken, isAdmin, async (req, res) => {
             try {
                 const subscribers = await newsletterCollection.find().toArray();
                 res.send(subscribers);
@@ -237,7 +228,7 @@ async function run() {
 
         // get all pending trainers list 
 
-        app.get("/pending-trainers", async (req, res) => {
+        app.get("/pending-trainers", verifyToken, isAdmin, async (req, res) => {
             try {
                 const pendingTrainers = await trainerCollection.find({ status: "pending" }).toArray();
                 res.send(pendingTrainers);
@@ -328,7 +319,7 @@ async function run() {
                 // Step 3: Update user role
                 const userResult = await userCollection.updateOne(
                     { email: trainerEmail },
-                    { $set: { userRole: 'trainer' } }
+                    { $set: { userRole: 'trainer', trainerStatus: "approved" } }
                 );
 
                 if (userResult.modifiedCount === 0) {
@@ -343,9 +334,9 @@ async function run() {
             }
         });
 
-        // get all approved trainers
+        // get all approved trainers (private)
 
-        app.get('/approved-trainers', async (req, res) => {
+        app.get('/approved-trainers', verifyToken, isAdmin, async (req, res) => {
             try {
                 const approved = await trainerCollection.find({ status: 'approved' }).toArray();
                 res.send(approved);
@@ -353,7 +344,16 @@ async function run() {
                 res.status(500).send({ success: false, message: 'Error fetching trainers' });
             }
         });
+        // get all approved trainers (public)
 
+        app.get('/approved-trainers-public', async (req, res) => {
+            try {
+                const approved = await trainerCollection.find({ status: 'approved' }).toArray();
+                res.send(approved);
+            } catch (err) {
+                res.status(500).send({ success: false, message: 'Error fetching trainers' });
+            }
+        });
 
         // added classes by admin 
 
@@ -385,7 +385,7 @@ async function run() {
             try {
                 const result = await userCollection.updateOne(
                     { email },
-                    { $set: { userRole: 'member' } }
+                    { $set: { userRole: 'member', trainerStatus: 'removed' } }
                 );
 
                 if (result.modifiedCount === 0) {
@@ -420,19 +420,78 @@ async function run() {
             }
         });
 
-        // returns all class docs for the select list
+        // delete a trainer from the class also
 
-        app.get('/admin-classes', async (_req, res) => {
+        app.delete('/delete-from-class', async (req, res) => {
+            const email = req.query.email;
+
+            if (!email)
+                return res.status(400).json({ success: false, message: 'Email query required' });
+
             try {
-                const classes = await classesCollection
-                    .find({})
-                    .toArray();
-                res.send({ success: true, data: classes });
+                const result = await classesCollection.updateMany(
+                    { 'trainer.trainerEmail': email },
+                    { $pull: { trainer: { trainerEmail: email } } }
+                );
+
+                res.json({
+                    success: true,
+                    modifiedDocs: result.modifiedCount,
+                    message: `Removed trainer (${email}) from ${result.modifiedCount} class(es)`
+                });
             } catch (err) {
                 console.error(err);
-                res.status(500).send({ success: false, message: 'Server error' });
+                res.status(500).json({ success: false, message: 'Server error' });
             }
         });
+
+
+        app.delete('/delete-from-payment-history', async (req, res) => {
+            const trainerId = req.query.trainerId;
+
+            if (!trainerId)
+                return res.status(400).json({ success: false, message: 'trainerId query required' });
+
+            try {
+                const result = await paymentHistory.deleteMany({
+                    trainerId: new ObjectId(trainerId)
+                });
+
+                res.json({
+                    success: true,
+                    deletedCount: result.deletedCount,
+                    message: `Removed ${result.deletedCount} payment record(s) for trainer ${trainerId}`
+                });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+
+
+        // returns all class docs for the select list
+
+        // GET /admin-classes?search=keyword
+        app.get('/admin-classes', async (req, res) => {
+            try {
+                const searchQuery = req.query.search || "";
+
+                const filter = searchQuery
+                    ? {
+                        name: { $regex: searchQuery, $options: 'i' } // case-insensitive search
+                    }
+                    : {};
+
+                const classes = await classesCollection.find(filter).toArray();
+
+                res.json({ success: true, data: classes });
+            } catch (error) {
+                console.error('Error fetching classes:', error);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
 
         // get previously added data by a trainer for read only ui
 
@@ -517,7 +576,7 @@ async function run() {
         });
 
 
-        app.get('/trainer-slot/:email', async (req, res) => {
+        app.get('/trainer-slot/:email', verifyToken, isTrainer, async (req, res) => {
             const { email } = req.params;
 
             try {
@@ -670,7 +729,7 @@ async function run() {
         // save forms data
 
         app.post('/save-forums-data', async (req, res) => {
-            const { title, tags = [], content, imageURL = '', authorImage, author, authorEmail } = req.body;
+            const { title, tags = [], content, imageURL = '', authorImage, author, authorEmail, authorRole } = req.body;
 
             if (!title || !content) {
                 return res
@@ -688,6 +747,7 @@ async function run() {
                     author,
                     authorEmail,
                     voteCount: 0,
+                    authorRole,
                     createdAt: new Date().toISOString()
                 };
 
@@ -699,8 +759,12 @@ async function run() {
             }
         });
 
+        app.get('/forums-at-home', async (req, res) => {
+            const forums = await forumsCollection.find({}).sort({ createdAt: -1 }).limit(6).toArray();
+            res.send({ data: forums })
+        })
 
-        // get forums details
+        // get forums with pagination
 
         app.get('/forums', async (req, res) => {
             const page = parseInt(req.query.page) || 1;
@@ -725,6 +789,28 @@ async function run() {
             } catch (err) {
                 console.error(err);
                 res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+        app.get('/forum/:id', async (req, res) => {
+            const { id } = req.params;
+
+            // Validate MongoDB ObjectId
+            if (!ObjectId.isValid(id)) {
+                return res.status(400).send({ success: false, message: "Invalid ID format" });
+            }
+
+            try {
+                const post = await forumsCollection.findOne({ _id: new ObjectId(id) });
+
+                if (!post) {
+                    return res.status(404).send({ success: false, message: "Post not found" });
+                }
+
+                res.send({ success: true, data: post });
+            } catch (error) {
+                console.error("Error fetching forum post:", error);
+                res.status(500).send({ success: false, message: "Server error" });
             }
         });
 
@@ -803,15 +889,7 @@ async function run() {
             console.log("user logged in you system")
         })
 
-        //give a token to a user after he login
 
-        app.post('/jwt', async (req, res) => {
-            const { email } = req.body;
-            if (!email) return res.status(400).send({ message: 'Email required' });
-
-            const token = generateToken(email);
-            res.send({ token });
-        });
 
 
         app.get('/slot-details/:slotId', async (req, res) => {
@@ -836,7 +914,6 @@ async function run() {
                     }
                 );
 
-                console.log(trainerDoc)
 
                 if (!trainerDoc || !trainerDoc.slots?.length)
                     return res.status(404).json({ success: false, message: 'Slot not found' });
@@ -1034,8 +1111,8 @@ async function run() {
             try {
                 const topClasses = await classesCollection
                     .aggregate([
-                        { $match: { totalBooked: { $gt: 0 } } }, 
-                        { $sort: { totalBooked: -1, createdAt: -1 } }, 
+                        { $match: { totalBooked: { $gt: 0 } } },
+                        { $sort: { totalBooked: -1, createdAt: -1 } },
                         { $limit: 6 },
                         {
                             $project: {
@@ -1056,7 +1133,103 @@ async function run() {
             }
         })
 
+        // get the reviews
+        app.get('/reviews/latest', async (req, res) => {
+            const limit = 3;
 
+            try {
+                const reviews = await userReviews
+                    .find({})
+                    .sort({ createdAt: -1 })
+                    .limit(limit)
+                    .toArray();
+
+                res.json(reviews);
+            } catch (err) {
+                console.error('Failed to fetch reviews:', err);
+                res.status(500).json({ message: 'Internal Server Error' });
+            }
+        });
+
+
+        app.get('/admin/financial-summary', verifyToken, isAdmin, async (_req, res) => {
+            try {
+                // Total Balance
+                const totalAgg = await paymentHistory.aggregate([
+                    { $group: { _id: null, sum: { $sum: '$amount' } } }
+                ]).toArray();
+                const totalBalance = totalAgg[0]?.sum || 0;
+
+                // Recent Payments
+                const recentPayments = await paymentHistory
+                    .find({})
+                    .sort({ paidAt: -1 })
+                    .limit(6)
+                    .toArray();
+
+                // Subscriber Count (distinct email)
+                const subscriberAgg = await newsletterCollection.aggregate([
+                    { $group: { _id: '$email' } },
+                    { $count: 'count' }
+                ]).toArray();
+                const subscriberCount = subscriberAgg[0]?.count || 0;
+
+                // Paid Member Count (distinct studentEmail)
+                const paidMemberAgg = await paymentHistory.aggregate([
+                    { $group: { _id: '$studentEmail' } },
+                    { $count: 'count' }
+                ]).toArray();
+                const paidMemberCount = paidMemberAgg[0]?.count || 0;
+
+                // Send response
+                res.json({
+                    success: true,
+                    totalBalance,
+                    recentPayments,
+                    subscriberCount,
+                    paidMemberCount
+                });
+            } catch (err) {
+                console.error(err);
+                res.status(500).json({ success: false, message: 'Server error' });
+            }
+        });
+
+
+        //give a token to a user after he login
+
+        app.post('/jwt', async (req, res) => {
+            const { email } = req.body;
+            console.log(email)
+            if (!email) return res.status(400).send({ message: 'Email required' });
+
+            const token = generateToken(email);
+            res.send({ token });
+
+        });
+
+
+
+
+
+        async function isAdmin(req, res, next) {
+            const user = await userCollection.findOne({ email: req.user.email });
+
+            if (user?.userRole !== "admin") return res.status(403).send("Only Admin");
+            next();
+        }
+
+        async function isTrainer(req, res, next) {
+            const user = await userCollection.findOne({ email: req.user.email });
+            if (user?.userRole !== "trainer") return res.status(403).send("Only Trainer");
+            next();
+        }
+
+        async function isMember(req, res, next) {
+            const user = await userCollection.findOne({ email: req.user.email });
+            if (user?.userRole !== "member") return res.status(403).send("Only Trainer");
+            next();
+        }
 
         // await client.db("admin").command({ ping: 1 });
         console.log("Pinged your deployment. You successfully connected to MongoDB!");
