@@ -476,6 +476,10 @@ async function run() {
         app.get('/admin-classes', async (req, res) => {
             try {
                 const searchQuery = req.query.search || "";
+                const sortValue=req.query.sort
+                const sortingOrder=sortValue==="true"? 1:-1 ;
+
+            
 
                 const filter = searchQuery
                     ? {
@@ -483,7 +487,7 @@ async function run() {
                     }
                     : {};
 
-                const classes = await classesCollection.find(filter).toArray();
+                const classes = (await classesCollection.find(filter).sort({ "totalBooked":sortingOrder }).toArray());
 
                 res.json({ success: true, data: classes });
             } catch (error) {
