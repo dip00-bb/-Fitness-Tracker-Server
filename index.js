@@ -256,6 +256,25 @@ async function run() {
                 res.status(500).send({ error: "Internal Server Error" });
             }
         });
+        // get details of specific trainers for dashboard
+
+        app.get("/trainers-dashboard-details/:email", async (req, res) => {
+            const email = req.params.email;
+
+            try {
+                const trainer = await trainerCollection.findOne({ email: email });
+
+                if (!trainer) {
+                    return res.status(404).send({ error: "Trainer not found" });
+                }
+
+                res.send(trainer);
+            } catch (error) {
+                console.error("Failed to fetch trainer details:", error);
+                res.status(500).send({ error: "Internal Server Error" });
+            }
+        });
+
 
         // reject pending trainer
 
@@ -476,10 +495,10 @@ async function run() {
         app.get('/admin-classes', async (req, res) => {
             try {
                 const searchQuery = req.query.search || "";
-                const sortValue=req.query.sort
-                const sortingOrder=sortValue==="true"? 1:-1 ;
+                const sortValue = req.query.sort
+                const sortingOrder = sortValue === "true" ? 1 : -1;
 
-            
+
 
                 const filter = searchQuery
                     ? {
@@ -487,7 +506,7 @@ async function run() {
                     }
                     : {};
 
-                const classes = (await classesCollection.find(filter).sort({ "totalBooked":sortingOrder }).toArray());
+                const classes = (await classesCollection.find(filter).sort({ "totalBooked": sortingOrder }).toArray());
 
                 res.json({ success: true, data: classes });
             } catch (error) {
