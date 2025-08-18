@@ -3,6 +3,7 @@ const jwt = require("jsonwebtoken");
 const cors = require('cors');
 const dotenv = require('dotenv');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { faker } = require('@faker-js/faker');
 dotenv.config();
 
 const app = express();
@@ -34,8 +35,58 @@ function verifyToken(req, res, next) {
 }
 
 
+function generateTrainerDetails() {
+    const totalStudent = faker.number.int({ min: 500, max: 1500 });
+    const newStudent = faker.number.int({ min: 100, max: 400 });
+    const profileVisit = faker.number.int({ min: 1000, max: 5000 });
+    const totalRevenue = faker.number.int({ min: 2000, max: 10000 });
+    const change = faker.number.float({ min: -10, max: 15, precision: 0.1 });
 
+    // months overview
+    const months = ["Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug"];
+    const overview = months.map((month, i) => ({
+        month,
+        students: totalStudent - ((months.length - (i + 1)) * Math.floor(totalStudent / months.length)),
+        new: faker.number.int({ min: 50, max: 250 }),
+        visits: faker.number.int({ min: 500, max: 3000 }),
+        revenue: faker.number.int({ min: 1500, max: 8000 })
+    }));
 
+    const bookingsDistribution = [
+        { label: "Zen Flex Yoga", value: faker.number.int({ min: 10, max: 40 }) },
+        { label: "Iron Core Strength", value: faker.number.int({ min: 10, max: 30 }) },
+        { label: "Sweat Sprint Cardio", value: faker.number.int({ min: 10, max: 25 }) },
+        { label: "Rhythm & Sweat", value: faker.number.int({ min: 5, max: 20 }) },
+        { label: "HIIT & Rip", value: faker.number.int({ min: 5, max: 20 }) },
+        { label: "Warrior Conditioning", value: faker.number.int({ min: 5, max: 20 }) }
+    ];
+
+    return {
+        totalStudent,
+        newStudent,
+        profileVisit,
+        totalRevenue,
+        change,
+        overview,
+        bookingsDistribution
+    };
+}
+
+function generateActivityTracking() {
+    // generate weekly exercise hours (7 days)
+    const weeklyExercise = Array.from({ length: 7 }, () =>
+        faker.number.float({ min: 1, max: 3, precision: 0.5 })
+    );
+
+    // generate stats details
+    const stasDetails = {
+        totalClass: faker.number.int({ min: 2, max: 8 }),
+        attendance: `${faker.number.int({ min: 60, max: 95 })}%`,
+        monthlyActive: faker.number.int({ min: 40, max: 90 }),
+    };
+
+    return { weeklyExercise, stasDetails };
+}
 
 const stripe = require('stripe')(process.env.PAYMENT_GATEWAY_KEY)
 
@@ -83,7 +134,7 @@ async function run() {
                     return res.status(409).send({ message: "User already exists" });
                 }
 
-
+                userData.activityTracking = generateActivityTracking();
                 const result = await userCollection.insertOne(userData);
                 res.status(201).send({ message: "User saved", result });
 
@@ -324,7 +375,12 @@ async function run() {
                 // Step 1: Update trainer status
                 const trainerResult = await trainerCollection.updateOne(
                     { _id: new ObjectId(trainerId) },
-                    { $set: { status: 'approved' } }
+                    {
+                        $set: {
+                            status: "approved",
+                            trainerDetails: generateTrainerDetails()
+                        }
+                    }
                 );
 
                 if (trainerResult.modifiedCount === 0) {
@@ -913,7 +969,14 @@ async function run() {
         })
 
 
+        app.get('/user-details-dashboard/:email', async (req, res) => {
+            const email = req.params.email;
+            const result = await userCollection.findOne(
+                { email },
+            )
+            res.send({ result });
 
+        })
 
         app.get('/slot-details/:slotId', async (req, res) => {
             const { slotId } = req.params;
